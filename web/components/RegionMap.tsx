@@ -54,16 +54,10 @@ function buildFoodIcon(
   const fallback = "🍽️";
   const localSrc = marker.iconPath;
   const title = escapeHtmlAttr(marker.iconLabel ?? marker.label);
-  const outline = [
-    "drop-shadow(1px 0 0 rgba(255,255,255,.98))",
-    "drop-shadow(-1px 0 0 rgba(255,255,255,.98))",
-    "drop-shadow(0 1px 0 rgba(255,255,255,.98))",
-    "drop-shadow(0 -1px 0 rgba(255,255,255,.98))",
-    "drop-shadow(1px 1px 0 rgba(255,255,255,.98))",
-    "drop-shadow(-1px -1px 0 rgba(255,255,255,.98))",
-    "drop-shadow(-1px 1px 0 rgba(255,255,255,.98))",
-    "drop-shadow(1px -1px 0 rgba(255,255,255,.98))",
-  ].join(" ");
+  // 지도 이동·확대 중 모든 아이콘에 8개의 drop-shadow를 동시에 계산하면
+  // 저사양 기기에서 프레임이 크게 떨어진다. 한 번의 외곽선 그림자로 줄여
+  // 시인성은 유지하면서 GPU 합성 비용을 낮춘다.
+  const outline = "drop-shadow(0 0 1.5px rgba(255,255,255,.98))";
   const shadow = opts.selected
     ? "drop-shadow(0 10px 18px rgba(28,24,21,.34))"
     : "drop-shadow(0 6px 12px rgba(28,24,21,.24))";
@@ -73,7 +67,7 @@ function buildFoodIcon(
 
   return leaflet.divIcon({
     className: "region-map-food-icon",
-    html: `<span title="${title}" style="position:relative;display:flex;align-items:center;justify-content:center;width:${size}px;height:${size}px;background:transparent;${cursor}">
+    html: `<span title="${title}" style="position:relative;display:flex;align-items:center;justify-content:center;width:${size}px;height:${size}px;background:transparent;transform:translateZ(0);will-change:transform;${cursor}">
       ${img}
       <span aria-hidden="true" style="display:${localSrc ? "none" : "flex"};align-items:center;justify-content:center;width:${inner}px;height:${inner}px;font-size:${opts.selected ? 28 : 24}px;line-height:1;filter:${shadow};">${fallback}</span>
     </span>`,
@@ -182,10 +176,17 @@ export function RegionMap({
         scrollWheelZoom: true,
         attributionControl: true,
         zoomControl: true,
+        // 휠 입력을 너무 촘촘하게 처리하면 타일/마커 재배치가 연속으로 발생해
+        // 버벅이는 느낌이 난다. 약간 완만하게 묶어서 처리한다.
+        wheelDebounceTime: 35,
+        wheelPxPerZoomLevel: 90,
+        zoomAnimation: true,
+        markerZoomAnimation: true,
+        fadeAnimation: false,
         ...(lockToJeonnam
           ? {
               maxBounds: jeonnamOuterBounds,
-              maxBoundsViscosity: 1,
+              maxBoundsViscosity: 0.85,
               minZoom: 8,
             }
           : {}),
@@ -195,6 +196,11 @@ export function RegionMap({
       leaflet
         .tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
           maxZoom: 19,
+          // 이동/휠 확대 도중 매 프레임 새 타일을 갱신하지 않고 동작이 끝난 뒤
+          // 필요한 타일을 채운다. 주변 타일은 조금 더 보관해 재요청을 줄인다.
+          updateWhenIdle: true,
+          updateWhenZooming: false,
+          keepBuffer: 4,
           attribution:
             '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
         })
