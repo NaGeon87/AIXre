@@ -177,8 +177,8 @@ export function MapChatExplorer({
 
   // 첫 화면에는 광주를 제외하고 전라남도 음식특화거리만 표시한다.
   // LLM이 음식을 추천하면 해당 음식을 실제로 취급하는 광주·전남 식당 좌표를
-  // 음식 핀으로 최대 2곳씩 추가한다.
-  const { markers, firstFoodMarkerByFoodId, foodMarkerCount } = useMemo(() => {
+  // 음식 핀으로 좌표가 있는 연결 식당을 모두 추가한다. 식당 카드의 "다른 식당 보기"는 이 목록을 순환한다.
+  const { markers, firstFoodMarkerByFoodId, foodMarkerIdsByFoodId, foodMarkerCount } = useMemo(() => {
     const streetMarkers: MapMarker[] = streets
       .filter(
         (street) =>
@@ -197,6 +197,7 @@ export function MapChatExplorer({
 
     const foodMarkers: MapMarker[] = [];
     const firstByFood = new Map<string, string>();
+    const markerIdsByFood = new Map<string, string[]>();
     for (const food of recommendedFoods) {
       const restaurants = food.restaurants
         .filter(
@@ -209,10 +210,12 @@ export function MapChatExplorer({
             Number(b.isLocalSpecialty) - Number(a.isLocalSpecialty),
         );
 
-      let added = 0;
       for (const restaurant of restaurants) {
         const id = `food:${food.id}:${restaurant.id}`;
         if (!firstByFood.has(food.id)) firstByFood.set(food.id, id);
+        const idsForFood = markerIdsByFood.get(food.id) ?? [];
+        idsForFood.push(id);
+        markerIdsByFood.set(food.id, idsForFood);
         foodMarkers.push({
           id,
           lat: restaurant.lat as number,
@@ -221,8 +224,6 @@ export function MapChatExplorer({
           kind: "food",
           highlight: id === selectedId,
         });
-        added += 1;
-        if (added >= 2) break;
       }
     }
 
@@ -232,6 +233,7 @@ export function MapChatExplorer({
           ? foodMarkers
           : streetMarkers,
       firstFoodMarkerByFoodId: firstByFood,
+      foodMarkerIdsByFoodId: markerIdsByFood,
       foodMarkerCount: foodMarkers.length,
     };
   }, [streets, recommendedFoods, selectedId, locationIntent, mapView]);
@@ -376,6 +378,16 @@ export function MapChatExplorer({
         setMapHasMoved(false);
       }, 1350);
     }
+  };
+
+  const showNextRestaurant = () => {
+    if (!selectedFoodLocation || !selectedId) return;
+    const ids = foodMarkerIdsByFoodId.get(selectedFoodLocation.food.id) ?? [];
+    if (ids.length < 2) return;
+
+    const currentIndex = ids.indexOf(selectedId);
+    const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % ids.length : 0;
+    setSelectedId(ids[nextIndex]);
   };
 
   const saveTasteReturnState = () => {
@@ -530,13 +542,24 @@ export function MapChatExplorer({
                     </svg>
                   </a>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setSelectedId(undefined)}
-                  className="shrink-0 rounded-full border border-line px-2.5 py-1 text-[12px] text-fg-muted"
-                >
-                  닫기
-                </button>
+                <div className="flex shrink-0 items-center gap-2">
+                  {(foodMarkerIdsByFoodId.get(selectedFoodLocation.food.id)?.length ?? 0) > 1 && (
+                    <button
+                      type="button"
+                      onClick={showNextRestaurant}
+                      className="rounded-full border border-line px-3 py-1 text-[12px] font-medium text-brand transition hover:border-brand hover:bg-accent-soft"
+                    >
+                      다른 식당 보기
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedId(undefined)}
+                    className="rounded-full border border-line px-2.5 py-1 text-[12px] text-fg-muted"
+                  >
+                    닫기
+                  </button>
+                </div>
               </div>
 
               <p className="mt-3 text-[11px] leading-relaxed text-fg-muted">
