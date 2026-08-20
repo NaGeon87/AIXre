@@ -1,0 +1,242 @@
+import { NextResponse } from "next/server";
+
+import { foods } from "@/lib/data";
+import { getKstMonth } from "@/lib/kst";
+import {
+  detectLocationIntent,
+  isExplicitlyExcluded,
+  restaurantMatchesLocation,
+  type LocationIntent,
+} from "@/lib/location";
+import { parseTasteText } from "@/lib/parse-taste";
+import {
+  DEFAULT_PREFERENCE,
+  recommendFoods,
+  type Preference,
+} from "@/lib/recommend";
+import type { Food } from "@/lib/types";
+
+type ChatTurn = { role: "user" | "assistant"; content: string };
+type LlmResult = {
+  reply: string;
+  foodIds: string[];
+  understood?: string[];
+};
+
+function detectExcludedFoodTerms(message: string): string[] {
+  const normalized = message.replace(/\s+/g, "");
+  const terms = Array.from(
+    new Set(foods.flatMap((food) => [food.ingredient, food.displayName, food.name]).filter((v): v is string => Boolean(v))),
+  ).sort((a, b) => b.length - a.length);
+  return terms.filter((term) => {
+    const compact = term.replace(/\s+/g, "");
+    if (compact.length < 2 || !normalized.includes(compact)) return false;
+    return isExplicitlyExcluded(normalized, [compact]);
+  });
+}
+
+function compactFood(food: Food, location: LocationIntent | null) {
+  const restaurants = food.restaurants.filter((r) => restaurantMatchesLocation(r, location));
+  return {
+    id: food.id,
+    name: food.name,
+    displayName: food.displayName,
+    ingredient: food.ingredient,
+    spicy: food.spicy,
+    hasSoup: food.hasSoup,
+    isRaw: food.isRaw,
+    mainIngredients: food.mainIngredients,
+    months: food.months,
+    restaurantCount: restaurants.length,
+    restaurantLocations: Array.from(new Set(restaurants.map((r) => `${r.region} ${r.area}`))).slice(0, 8),
+  };
+}
+
+function lexicalScore(food: Food, message: string) {
+  const text = message.replace(/\s+/g, "").toLowerCase();
+  if (!text) return 0;
+  const fields = [food.name, food.displayName, food.ingredient]
+    .filter(Boolean)
+    .map((value) => String(value).replace(/\s+/g, "").toLowerCase());
+  let score = 0;
+  for (const field of fields) {
+    if (!field) continue;
+    if (text.includes(field)) score += 30;
+    if (field.includes(text) && text.length >= 2) score += 15;
+  }
+  return score;
+}
+
+function satisfiesExplicitTaste(food: Food, parsed: ReturnType<typeof parseTasteText>) {
+  const p = parsed.pref;
+  // 맵기는 명시적으로 말했더라도 후보를 잘라내지 않는다.
+  // 추천 점수에서만 감점해 완전히 다른 맵기도 대체 추천으로 취급하지 않는다.
+  if (p.soup !== undefined && p.soup !== 1 && food.hasSoup !== (p.soup === 2)) return false;
+  if (p.raw !== undefined && food.isRaw !== (p.raw === "O")) return false;
+  if (p.ingredient !== undefined && p.ingredient !== "상관없음" && !food.mainIngredients.includes(p.ingredient)) return false;
+  if (p.month !== undefined && food.months.length > 0 && !food.months.includes(p.month)) return false;
+  return true;
+}
+
+function buildLocalCandidates(message: string, excludeFoodIds: string[] = [], location: LocationIntent | null) {
+  const parsed = parseTasteText(message);
+  const pref: Preference = { ...DEFAULT_PREFERENCE, month: getKstMonth(), ...parsed.pref };
+  const excluded = new Set(excludeFoodIds);
+  const excludedFoodTerms = detectExcludedFoodTerms(message);
+  const locationFoods = foods.filter((food) => {
+    if (excluded.has(food.id)) return false;
+    if (!food.restaurants.some((r) => restaurantMatchesLocation(r, location))) return false;
+    if (parsed.excludedIngredients.some((category) => food.mainIngredients.includes(category))) return false;
+    const compactFields = [food.ingredient, food.displayName, food.name].map((value) => String(value || "").replace(/\s+/g, ""));
+    if (excludedFoodTerms.some((term) => compactFields.some((field) => field.includes(term.replace(/\s+/g, ""))))) return false;
+    return true;
+  });
+  const exact = locationFoods.filter((food) => satisfiesExplicitTaste(food, parsed));
+  const source = exact.length > 0 ? exact : locationFoods;
+
+  const tasteRanked = recommendFoods(source, pref, 40);
+  const tasteMap = new Map(tasteRanked.map((item, index) => [item.food.id, 40 - index]));
+  return source
+    .map((food) => ({ food, score: (tasteMap.get(food.id) ?? 0) + lexicalScore(food, message) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 60)
+    .map((item) => item.food);
+}
+
+function diversifyFoodIds(
+  primaryIds: string[],
+  localFoods: Food[],
+  limit = 5,
+  allowTwoPerIngredient = false,
+): string[] {
+  // LLM 순위를 최대한 존중하되 첫 추천은 같은 실제 식재료를 1개만 노출한다.
+  // ‘다른 추천 보기’에서는 이미 본 foodId가 제외되어 들어오므로 화면당 2개까지
+  // 허용해, 첫 화면에서 숨긴 전복회/전복찜 같은 고득점 변형도 다시 볼 수 있다.
+  const baseOrder = Array.from(new Set([...primaryIds, ...localFoods.map((food) => food.id)]));
+  const foodById = new Map(localFoods.map((food) => [food.id, food]));
+  const maxPerIngredient = allowTwoPerIngredient ? 2 : 1;
+  const picked: string[] = [];
+  const ingredientCount = new Map<string, number>();
+
+  const take = (enforceCap: boolean) => {
+    for (const id of baseOrder) {
+      if (picked.length >= limit) break;
+      if (picked.includes(id)) continue;
+      const food = foodById.get(id);
+      if (!food) continue;
+      const ingredient = food.ingredient || food.name;
+      const count = ingredientCount.get(ingredient) ?? 0;
+      if (enforceCap && count >= maxPerIngredient) continue;
+      ingredientCount.set(ingredient, count + 1);
+      picked.push(id);
+    }
+  };
+
+  take(true);
+  // 후보 식재료 종류 자체가 5개보다 적은 경우에만 중복을 허용해 항상 5개를 채운다.
+  if (picked.length < limit) take(false);
+  return picked.slice(0, limit);
+}
+
+function fallbackRecommend(message: string, excludeFoodIds: string[] = [], location: LocationIntent | null): LlmResult {
+  const parsed = parseTasteText(message);
+  const localFoods = buildLocalCandidates(message, excludeFoodIds, location);
+  const diversifiedIds = diversifyFoodIds(localFoods.map((food) => food.id), localFoods, 5, excludeFoodIds.length > 0);
+  const byId = new Map(localFoods.map((food) => [food.id, food]));
+  const candidates = diversifiedIds.map((id) => byId.get(id)).filter((food): food is Food => Boolean(food));
+  const understood = parsed.hits.map((hit) => `${hit.label}: ${hit.reading}`);
+  if (location?.label) understood.push(`지역: ${location.label}`);
+  const excludedFoodTerms = detectExcludedFoodTerms(message);
+  if (excludedFoodTerms.length) understood.push(`음식 제외: ${excludedFoodTerms.join("·")}`);
+  return {
+    reply: candidates.length
+      ? `${understood.length ? `${understood.join(", ")}로 이해했어요. ` : ""}${candidates.map((f) => f.displayName || f.name).join(", ")}을 추천해요.`
+      : `${location?.label ?? "선택한 조건"}에서 맞는 음식점을 찾지 못했어요.`,
+    foodIds: candidates.map((f) => f.id),
+    understood,
+  };
+}
+
+function extractJson(text: string): LlmResult | null {
+  const tryParse = (value: string) => {
+    try {
+      const parsed = JSON.parse(value) as LlmResult;
+      return parsed && typeof parsed.reply === "string" && Array.isArray(parsed.foodIds) ? parsed : null;
+    } catch { return null; }
+  };
+  const direct = tryParse(text);
+  if (direct) return direct;
+  const match = text.match(/\{[\s\S]*\}/);
+  return match ? tryParse(match[0]) : null;
+}
+
+async function callSchoolLlm(url: string, apiKey: string, model: string, message: string, history: ChatTurn[], catalog: ReturnType<typeof compactFood>[], location: LocationIntent | null) {
+  const endpoint = `${url.replace(/\/$/, "")}/v1/chat/completions`;
+  const system = `너는 광주·전남 미식 추천 AI다. 자연어의 강도·지역·재료·조리방식 의도를 적극적으로 해석한다. 반드시 제공된 음식 후보 안에서 최대 5개만 추천한다.
+
+해석 예시:
+- '엄청 매운/아주 매운/불같이 매운' => spicy=3 선호로 이해하되 필터링하지 않고 감점에만 사용
+- '매운' => spicy=2 선호
+- '살짝 매운' => spicy=1 선호
+- '안 매운' => spicy=0 선호
+- '해산물 먹고 싶다' => mainIngredients에 해산물 우선
+- '광주에서 먹고 싶다/광주 음식점 찾는다' => 아래 후보는 이미 광주 식당이 있는 음식으로 제한되어 있으므로 그 안에서 고른다.
+- '광주 말고/광주 빼고' => 광주 식당은 후보에서 이미 제외되어 있다. 절대로 광주를 다시 추천하지 않는다.
+- '해산물 말고/고기 빼고/전복 말고' 같은 부정 표현 => 해당 범주나 음식은 후보에서 이미 제외되어 있다. 반대 범주 하나를 임의로 단정하지 않는다.
+
+규칙:
+1) 추천 우선순위는 날것/익힘 여부 > 주재료 > 국물 여부 > 맵기 순이다.
+2) 맵기는 후보 탈락 조건이 아니라 차이가 클수록 감점하는 요소다. 맵기가 완전히 달라도 그것만으로 대체 추천이라고 표현하지 않는다.
+3) 상위 5개에 전복·홍어처럼 동일한 실제 ingredient가 반복되지 않도록 서로 다른 식재료를 우선 선택한다.
+4) foodIds에는 아래 catalog의 id만 넣는다.
+5) 데이터에 없는 사실·효능·맛집 순위를 지어내지 않는다.
+6) 비슷한 메뉴만 반복하지 않는다.
+7) 오직 JSON만 반환한다. 형식: {"reply":"...","foodIds":["id"],"understood":["엄청 매움→맵기 3","광주"]}
+
+현재 월: ${getKstMonth()}월
+지역 의도: ${location?.label ?? "지정 없음"}
+후보 데이터:
+${JSON.stringify(catalog)}`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: { "content-type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ model, temperature: 0.15, max_tokens: 1100, messages: [{ role: "system", content: system }, ...history.slice(-8), { role: "user", content: message }] }),
+  });
+  if (!response.ok) throw new Error(`School LLM error ${response.status}: ${await response.text()}`);
+  const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+  return extractJson(data.choices?.[0]?.message?.content ?? "");
+}
+
+export async function POST(request: Request) {
+  const body = (await request.json()) as { message?: string; history?: ChatTurn[]; excludeFoodIds?: string[] };
+  const message = body.message?.trim();
+  if (!message) return NextResponse.json({ error: "message is required" }, { status: 400 });
+
+  const excludeFoodIds = Array.isArray(body.excludeFoodIds) ? body.excludeFoodIds.filter((id): id is string => typeof id === "string").slice(0, 20) : [];
+  const location = detectLocationIntent(message, foods.flatMap((food) => food.restaurants));
+  const fallback = fallbackRecommend(message, excludeFoodIds, location);
+  const localFoods = buildLocalCandidates(message, excludeFoodIds, location);
+  const candidates = localFoods.map((food) => compactFood(food, location));
+  const validIds = new Set(localFoods.map((food) => food.id));
+  const history = (body.history ?? []).filter((turn) => turn && (turn.role === "user" || turn.role === "assistant") && typeof turn.content === "string");
+
+  try {
+    let parsed: LlmResult | null = null;
+    let mode = "local";
+    const schoolUrl = process.env.SCHOOL_LLM_URL;
+    if (schoolUrl && candidates.length > 0) {
+      parsed = await callSchoolLlm(schoolUrl, process.env.SCHOOL_LLM_API_KEY || "aix-key", process.env.SCHOOL_LLM_MODEL || "Qwen/Qwen3-8B", message, history, candidates, location);
+      mode = "school-llm";
+    }
+    if (!parsed) return NextResponse.json({ ...fallback, mode: "local", location });
+
+    const excluded = new Set(excludeFoodIds);
+    const llmIds = parsed.foodIds.filter((id) => validIds.has(id) && !excluded.has(id));
+    const foodIds = diversifyFoodIds(llmIds, localFoods, 5, excludeFoodIds.length > 0);
+    if (foodIds.length === 0) return NextResponse.json({ ...fallback, mode: "local", location });
+    return NextResponse.json({ reply: parsed.reply, foodIds, understood: parsed.understood ?? fallback.understood ?? [], mode, location });
+  } catch (error) {
+    console.error(error);
+    return NextResponse.json({ ...fallback, mode: "local", location });
+  }
+}
