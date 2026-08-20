@@ -196,7 +196,6 @@ export default async function StreetPage({ params }: { params: Promise<{ id: str
         </p>
         <p className="mt-3 rounded-xl bg-surface-alt px-3 py-2.5 text-[12px] text-fg-muted">
           📍 {street.address}
-          <br />※ 거리 아이콘은 현재 지도에 표시된 관련 식당들의 좌표 중심에 표시됩니다.
         </p>
       </section>
 
@@ -217,27 +216,10 @@ export default async function StreetPage({ params }: { params: Promise<{ id: str
       )}
 
       <section className="px-5 pt-7">
-        <div className="flex items-end justify-between gap-3">
-          <div>
-            <p className="text-[11px] font-bold text-brand">FOOD SHOPS</p>
-            <h2 className="mt-0.5 font-display text-[22px] text-fg">근처 식당 추천</h2>
-          </div>
-          <p className="text-right text-[11px] text-fg-muted">
-            대표음식 연결 {relatedShops.length}곳
-            <br />현재 표시 {shops.length}곳
-          </p>
+        <div>
+          <p className="text-[11px] font-bold text-brand">FOOD SHOPS</p>
+          <h2 className="mt-0.5 font-display text-[22px] text-fg">근처 식당 추천</h2>
         </div>
-
-        {relatedShops.length < MIN_VISIBLE_SHOPS && shops.length > relatedShops.length && (
-          <div className="mt-3 rounded-2xl border border-soup/40 bg-surface-alt px-4 py-3 text-[12px] leading-relaxed text-fg-muted">
-            <b className="font-bold text-fg">대표 먹거리와 직접 연결된 식당 데이터가 {relatedShops.length}곳뿐입니다.</b>{" "}
-            식당이 너무 적거나 비어 보이지 않도록 같은 {street.sigungu}의 등록 식당을
-            <b className="font-bold text-soup"> 지역 추가</b>로 구분해 함께 표시합니다.
-            {street.shopCount > 0 && (
-              <> 공식 거리 데이터의 점포 수는 {street.shopCount}곳으로 기록되어 있어 현재 음식 DB가 전체 업소를 모두 포함하지는 않습니다.</>
-            )}
-          </div>
-        )}
 
         {shops.length === 0 ? (
           <p className="mt-3 rounded-2xl border border-line bg-surface px-4 py-7 text-center text-[13px] leading-relaxed text-fg-muted">
@@ -283,9 +265,6 @@ export default async function StreetPage({ params }: { params: Promise<{ id: str
         )}
       </section>
 
-      <footer className="px-5 pt-7 text-[11px] leading-relaxed text-fg-muted">
-        <p>대표 먹거리와 직접 연결된 식당을 먼저 표시합니다. 현재 음식 DB의 직접 연결 식당이 적은 거리만 같은 시·군의 등록 식당을 ‘지역 추가’로 보충하며, 거리 아이콘은 실제 지도에 표시된 식당들의 좌표 중심에 놓습니다.</p>
-      </footer>
     </main>
   );
 }

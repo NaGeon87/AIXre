@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { CategoryTastePanel } from "@/components/CategoryTastePanel";
 import { RegionMap, type MapMarker } from "@/components/RegionMap";
 import { restaurantMatchesLocation, type LocationIntent } from "@/lib/location";
+import { getNearbyContent } from "@/lib/nearby-content";
 import { seasonNote } from "@/lib/season-notes";
 import { parseTasteText } from "@/lib/parse-taste";
 import {
@@ -20,6 +21,8 @@ import {
 import type { Food, Street } from "@/lib/types";
 
 type Message = { role: "user" | "assistant"; content: string };
+
+const TASTE_RETURN_STATE_KEY = "aix:taste-return-state";
 
 function spicyText(level: number) {
   return ["안 매움", "약간 매움", "매움", "아주 매움"][level] ?? `${level}`;
@@ -65,6 +68,48 @@ export function MapChatExplorer({
   // 화면으로 복원할 수 있어야 한다.
   const [mapView, setMapView] = useState<"initial" | "recommendation">("initial");
   const [mapResetKey, setMapResetKey] = useState(0);
+  const [mapHasMoved, setMapHasMoved] = useState(false);
+
+  useEffect(() => {
+    const raw = window.sessionStorage.getItem(TASTE_RETURN_STATE_KEY);
+    if (!raw) return;
+
+    try {
+      const saved = JSON.parse(raw) as {
+        messages?: Message[];
+        recommendedFoodIds?: string[];
+        selectedId?: string;
+        lastTaste?: string;
+        inputMode?: "ai" | "category";
+        lastCategoryPreference?: Preference | null;
+        expandedWhyIds?: string[];
+        expandedScoreIds?: string[];
+        categoryResult?: CategoryRecommendationResult | null;
+        categoryRound?: number;
+        categorySeenFoodIds?: string[];
+        locationIntent?: LocationIntent | null;
+        mapView?: "initial" | "recommendation";
+      };
+
+      if (saved.messages) setMessages(saved.messages);
+      if (saved.recommendedFoodIds) setRecommendedFoodIds(saved.recommendedFoodIds);
+      setSelectedId(saved.selectedId);
+      if (typeof saved.lastTaste === "string") setLastTaste(saved.lastTaste);
+      if (saved.inputMode) setInputMode(saved.inputMode);
+      if ("lastCategoryPreference" in saved) setLastCategoryPreference(saved.lastCategoryPreference ?? null);
+      if (saved.expandedWhyIds) setExpandedWhyIds(saved.expandedWhyIds);
+      if (saved.expandedScoreIds) setExpandedScoreIds(saved.expandedScoreIds);
+      if ("categoryResult" in saved) setCategoryResult(saved.categoryResult ?? null);
+      if (typeof saved.categoryRound === "number") setCategoryRound(saved.categoryRound);
+      if (saved.categorySeenFoodIds) setCategorySeenFoodIds(saved.categorySeenFoodIds);
+      if ("locationIntent" in saved) setLocationIntent(saved.locationIntent ?? null);
+      if (saved.mapView) setMapView(saved.mapView);
+    } catch {
+      // 저장 데이터가 깨졌다면 기본 상태로 시작한다.
+    } finally {
+      window.sessionStorage.removeItem(TASTE_RETURN_STATE_KEY);
+    }
+  }, []);
 
   const selectedStreet = useMemo(
     () => streets.find((street) => street.id === selectedId),
@@ -207,6 +252,7 @@ export function MapChatExplorer({
         )[0];
       if (food && restaurant) {
         setMapView("recommendation");
+        setMapHasMoved(true);
         setSelectedId(`food:${food.id}:${restaurant.id}`);
         return;
       }
@@ -311,13 +357,46 @@ export function MapChatExplorer({
     setLocationIntent(null);
     setSelectedId(undefined);
     setMapView("initial");
+    setMapHasMoved(false);
     setMapResetKey((key) => key + 1);
   };
 
   const resetMap = () => {
+    const wasRecommendationView = mapView === "recommendation";
+
+    // 현재 확대된 위치에서 전남 전체 구도로 먼저 부드럽게 날아간 뒤,
+    // 추천 식당 핀을 음식특화거리 핀으로 바꾼다. 먼저 핀 구성을 바꾸면
+    // 지도가 재생성돼 복귀 애니메이션이 끊겨 보일 수 있다.
     setSelectedId(undefined);
-    setMapView("initial");
     setMapResetKey((key) => key + 1);
+
+    if (wasRecommendationView) {
+      window.setTimeout(() => {
+        setMapView("initial");
+        setMapHasMoved(false);
+      }, 1350);
+    }
+  };
+
+  const saveTasteReturnState = () => {
+    window.sessionStorage.setItem(
+      TASTE_RETURN_STATE_KEY,
+      JSON.stringify({
+        messages,
+        recommendedFoodIds,
+        selectedId,
+        lastTaste,
+        inputMode,
+        lastCategoryPreference,
+        expandedWhyIds,
+        expandedScoreIds,
+        categoryResult,
+        categoryRound,
+        categorySeenFoodIds,
+        locationIntent,
+        mapView,
+      }),
+    );
   };
 
   const mapUnavailableReason = (food: Food) => {
@@ -331,35 +410,41 @@ export function MapChatExplorer({
     <main className="min-h-dvh bg-canvas lg:h-dvh lg:overflow-hidden">
       <div className="grid min-h-dvh lg:h-dvh lg:grid-cols-[minmax(0,1.35fr)_minmax(400px,0.65fr)]">
         <section className="relative min-h-[52vh] border-b border-line bg-surface lg:min-h-0 lg:border-b-0 lg:border-r">
-          <button
-            type="button"
-            onClick={resetMap}
-            className="absolute left-1/2 top-5 z-[800] inline-flex -translate-x-1/2 items-center gap-2 rounded-full border border-line bg-surface/95 px-4 py-2.5 text-[13px] font-bold text-brand shadow-sm backdrop-blur transition hover:border-brand hover:bg-surface"
-            aria-label="초기 지도 화면으로 돌아가기"
-          >
-            <svg
-              aria-hidden="true"
-              viewBox="0 0 24 24"
-              className="h-[17px] w-[17px]"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+          {mapHasMoved && (
+            <button
+              type="button"
+              onClick={resetMap}
+              className="absolute left-1/2 top-5 z-[800] inline-flex -translate-x-1/2 items-center gap-2 rounded-full border border-line bg-surface/95 px-4 py-2.5 text-[13px] font-bold text-brand shadow-sm backdrop-blur transition hover:border-brand hover:bg-surface"
+              aria-label="초기 지도 화면으로 돌아가기"
             >
-              <path d="M9 10 5 14l4 4" />
-              <path d="M5 14h8a6 6 0 1 0 0-12h-2" />
-            </svg>
-            돌아가기
-          </button>
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                className="h-[17px] w-[17px]"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M9 10 5 14l4 4" />
+                <path d="M5 14h8a6 6 0 1 0 0-12h-2" />
+              </svg>
+              돌아가기
+            </button>
+          )}
 
           <RegionMap
             markers={markers}
             height="100%"
             selectedId={selectedId}
-            onSelect={(id) => setSelectedId(id)}
+            onSelect={(id) => {
+              setSelectedId(id);
+              setMapHasMoved(true);
+            }}
             resetKey={mapResetKey}
             lockToJeonnam
+            onViewChange={setMapHasMoved}
           />
 
           {selectedStreet && (
@@ -458,12 +543,18 @@ export function MapChatExplorer({
                 {selectedFoodLocation.restaurant.address}
               </p>
 
-              <Link
-                href={`/nearby?restaurant=${encodeURIComponent(selectedFoodLocation.restaurant.name)}&food=${encodeURIComponent(selectedFoodLocation.food.displayName || selectedFoodLocation.food.name)}&region=${encodeURIComponent(selectedFoodLocation.restaurant.region)}&area=${encodeURIComponent(selectedFoodLocation.restaurant.area)}&lat=${selectedFoodLocation.restaurant.lat ?? ""}&lon=${selectedFoodLocation.restaurant.lon ?? ""}`}
-                className="mt-3 flex w-full items-center justify-center rounded-xl bg-brand px-4 py-3 text-[14px] font-bold text-fg-inverse transition hover:opacity-90"
-              >
-                근처 관광지 · 축제 추천 →
-              </Link>
+              {getNearbyContent(
+                selectedFoodLocation.restaurant.region,
+                selectedFoodLocation.restaurant.area,
+              ).hasAny && (
+                <Link
+                  onClick={saveTasteReturnState}
+                  href={`/nearby?restaurant=${encodeURIComponent(selectedFoodLocation.restaurant.name)}&food=${encodeURIComponent(selectedFoodLocation.food.displayName || selectedFoodLocation.food.name)}&region=${encodeURIComponent(selectedFoodLocation.restaurant.region)}&area=${encodeURIComponent(selectedFoodLocation.restaurant.area)}&lat=${selectedFoodLocation.restaurant.lat ?? ""}&lon=${selectedFoodLocation.restaurant.lon ?? ""}`}
+                  className="mt-3 flex w-full items-center justify-center rounded-xl bg-brand px-4 py-3 text-[14px] font-bold text-fg-inverse transition hover:opacity-90"
+                >
+                  근처 관광지 · 축제 추천 →
+                </Link>
+              )}
             </div>
           )}
         </section>
@@ -587,7 +678,7 @@ export function MapChatExplorer({
                           }
                           className="flex w-full items-center justify-between rounded-xl border border-accent/25 bg-accent-soft px-3 py-2.5 text-left transition hover:border-accent/50"
                         >
-                          <span className="text-[11px] font-bold text-accent">Why Now · Why Here 보기</span>
+                          <span className="text-[11px] font-bold text-accent">추천 이유</span>
                           <span
                             aria-hidden="true"
                             className={`text-[12px] text-accent transition-transform ${
@@ -734,6 +825,7 @@ export function MapChatExplorer({
                           type="button"
                           onClick={() => {
                             setMapView("recommendation");
+                            setMapHasMoved(true);
                             setSelectedId(firstFoodMarkerByFoodId.get(food.id));
                           }}
                           className="mt-2.5 rounded-lg border border-brand px-3 py-1.5 text-[11px] font-bold text-brand transition hover:bg-accent-soft"

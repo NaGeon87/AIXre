@@ -124,6 +124,7 @@ export function RegionMap({
   selectedId,
   resetKey = 0,
   lockToJeonnam = false,
+  onViewChange,
 }: {
   markers: MapMarker[];
   height?: number | string;
@@ -135,6 +136,8 @@ export function RegionMap({
   resetKey?: number;
   /** 전라남도 권역 안에서만 지도를 탐색하도록 제한한다. */
   lockToJeonnam?: boolean;
+  /** 사용자가 이동·확대/축소하거나 선택 지점으로 이동했는지 부모에 알린다. */
+  onViewChange?: (changed: boolean) => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -144,8 +147,11 @@ export function RegionMap({
   const leafletRef = useRef<typeof L | null>(null);
   // onSelect가 매 렌더 새 함수여도 지도를 다시 만들지 않게 ref로 우회한다.
   const onSelectRef = useRef(onSelect);
+  const onViewChangeRef = useRef(onViewChange);
+  const suppressViewChangeRef = useRef(false);
   useEffect(() => {
     onSelectRef.current = onSelect;
+    onViewChangeRef.current = onViewChange;
   });
 
   const points = markers.filter(
@@ -243,6 +249,13 @@ export function RegionMap({
         map.fitBounds(bounds, { padding: [32, 32], maxZoom: 15 });
       }
 
+      // 초기 setView/fitBounds는 '사용자가 지도를 움직인 것'으로 보지 않는다.
+      // 초기 구도가 잡힌 뒤부터 이동·확대/축소가 끝날 때만 돌아가기 버튼을 켠다.
+      const markViewChanged = () => {
+        if (!suppressViewChangeRef.current) onViewChangeRef.current?.(true);
+      };
+      map.on("moveend zoomend", markViewChanged);
+
       if (selectedId) {
         const selectedMarker = markerRefs.current.get(selectedId);
         if (selectedMarker) {
@@ -308,18 +321,34 @@ export function RegionMap({
 
     for (const marker of markerRefs.current.values()) marker.closeTooltip();
 
+    suppressViewChangeRef.current = true;
+    let resetFinished = false;
+    const finishReset = () => {
+      if (resetFinished) return;
+      resetFinished = true;
+      suppressViewChangeRef.current = false;
+      onViewChangeRef.current?.(false);
+    };
+    map.once("moveend", finishReset);
+    window.setTimeout(finishReset, 1650);
+
     if (lockToJeonnam) {
-      map.flyTo([34.72, 126.72], 9, { animate: true, duration: 0.8 });
+      map.flyTo([34.72, 126.72], 9, { animate: true, duration: 1.3, easeLinearity: 0.18 });
       return;
     }
 
     if (points.length === 1) {
-      map.flyTo([points[0].lat, points[0].lon], 14, { animate: true, duration: 0.8 });
+      map.flyTo([points[0].lat, points[0].lon], 14, { animate: true, duration: 1.3, easeLinearity: 0.18 });
       return;
     }
 
     const bounds = leaflet.latLngBounds(points.map((point) => [point.lat, point.lon]));
-    map.flyToBounds(bounds, { padding: [32, 32], maxZoom: 15, duration: 0.8 });
+    map.flyToBounds(bounds, {
+      padding: [32, 32],
+      maxZoom: 15,
+      duration: 1.3,
+      easeLinearity: 0.18,
+    });
   }, [resetKey, lockToJeonnam, pointsKey]);
 
   if (points.length === 0) {
