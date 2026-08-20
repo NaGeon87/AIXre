@@ -122,6 +122,7 @@ export function RegionMap({
   height = 260,
   onSelect,
   selectedId,
+  resetKey = 0,
   lockToJeonnam = false,
 }: {
   markers: MapMarker[];
@@ -130,6 +131,8 @@ export function RegionMap({
   onSelect?: (id: string) => void;
   /** 강조해서 가운데로 옮길 마커. 선택이 바뀌어도 지도를 다시 만들지 않는다. */
   selectedId?: string;
+  /** 값이 바뀌면 현재 마커 구성을 유지한 채 최초 지도 범위로 돌아간다. */
+  resetKey?: number;
   /** 전라남도 권역 안에서만 지도를 탐색하도록 제한한다. */
   lockToJeonnam?: boolean;
 }) {
@@ -296,6 +299,28 @@ export function RegionMap({
     map.flyTo(pos, Math.max(map.getZoom(), 13), { animate: true, duration: 1.15 });
     marker.openTooltip();
   }, [selectedId]);
+
+  useEffect(() => {
+    if (resetKey === 0) return;
+    const map = mapRef.current;
+    const leaflet = leafletRef.current;
+    if (!map || !leaflet || points.length === 0) return;
+
+    for (const marker of markerRefs.current.values()) marker.closeTooltip();
+
+    if (lockToJeonnam) {
+      map.flyTo([34.72, 126.72], 9, { animate: true, duration: 0.8 });
+      return;
+    }
+
+    if (points.length === 1) {
+      map.flyTo([points[0].lat, points[0].lon], 14, { animate: true, duration: 0.8 });
+      return;
+    }
+
+    const bounds = leaflet.latLngBounds(points.map((point) => [point.lat, point.lon]));
+    map.flyToBounds(bounds, { padding: [32, 32], maxZoom: 15, duration: 0.8 });
+  }, [resetKey, lockToJeonnam, pointsKey]);
 
   if (points.length === 0) {
     return (

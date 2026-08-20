@@ -55,6 +55,11 @@ export function MapChatExplorer({
   const [categoryRound, setCategoryRound] = useState(0);
   const [categorySeenFoodIds, setCategorySeenFoodIds] = useState<string[]>([]);
   const [locationIntent, setLocationIntent] = useState<LocationIntent | null>(null);
+  // 추천 결과와 지도 표시 상태를 분리한다. 사용자가 지도에서 "돌아가기"를
+  // 눌러도 오른쪽 추천 목록은 유지하고, 지도만 최초의 전남 음식특화거리
+  // 화면으로 복원할 수 있어야 한다.
+  const [mapView, setMapView] = useState<"initial" | "recommendation">("initial");
+  const [mapResetKey, setMapResetKey] = useState(0);
 
   const selectedStreet = useMemo(
     () => streets.find((street) => street.id === selectedId),
@@ -172,11 +177,14 @@ export function MapChatExplorer({
     }
 
     return {
-      markers: recommendedFoods.length > 0 ? foodMarkers : streetMarkers,
+      markers:
+        mapView === "recommendation" && recommendedFoods.length > 0
+          ? foodMarkers
+          : streetMarkers,
       firstFoodMarkerByFoodId: firstByFood,
       foodMarkerCount: foodMarkers.length,
     };
-  }, [streets, recommendedFoods, selectedId, locationIntent]);
+  }, [streets, recommendedFoods, selectedId, locationIntent, mapView]);
 
 
   const selectFirstMappedFood = (ids: string[], intent = locationIntent) => {
@@ -193,10 +201,12 @@ export function MapChatExplorer({
             Number(b.isLocalSpecialty) - Number(a.isLocalSpecialty),
         )[0];
       if (food && restaurant) {
+        setMapView("recommendation");
         setSelectedId(`food:${food.id}:${restaurant.id}`);
         return;
       }
     }
+    setMapView("initial");
     setSelectedId(undefined);
   };
 
@@ -295,6 +305,14 @@ export function MapChatExplorer({
     setExpandedScoreIds([]);
     setLocationIntent(null);
     setSelectedId(undefined);
+    setMapView("initial");
+    setMapResetKey((key) => key + 1);
+  };
+
+  const resetMap = () => {
+    setSelectedId(undefined);
+    setMapView("initial");
+    setMapResetKey((key) => key + 1);
   };
 
   const mapUnavailableReason = (food: Food) => {
@@ -308,28 +326,22 @@ export function MapChatExplorer({
     <main className="min-h-dvh bg-canvas lg:h-dvh lg:overflow-hidden">
       <div className="grid min-h-dvh lg:h-dvh lg:grid-cols-[minmax(0,1.35fr)_minmax(400px,0.65fr)]">
         <section className="relative min-h-[52vh] border-b border-line bg-surface lg:min-h-0 lg:border-b-0 lg:border-r">
-          <div className="absolute left-5 top-5 z-[800] rounded-2xl border border-line bg-surface/95 px-4 py-3 shadow-sm backdrop-blur">
-            <Link href="/" className="text-[12px] font-bold text-brand">
-              ← 전라맛도
-            </Link>
-            <p className="mt-1 font-display text-[20px] text-fg">광주 · 전남 음식 지도</p>
-            <p className="mt-0.5 text-[12px] text-fg-muted">
-              전남 음식거리를 보고, 자연어로 광주·전남 음식점도 찾아보세요
-            </p>
-            <div className="mt-2 flex flex-wrap gap-2 text-[10px] text-fg-muted">
-              {foodMarkerCount === 0 ? (
-                <span className="rounded-full border border-line bg-surface px-2 py-1">음식특화거리</span>
-              ) : (
-                <span className="rounded-full border border-line bg-surface px-2 py-1">● 추천 음식점 위치</span>
-              )}
-            </div>
-          </div>
+          <button
+            type="button"
+            onClick={resetMap}
+            className="absolute left-5 top-5 z-[800] inline-flex items-center gap-1.5 rounded-xl border border-line bg-surface/95 px-3.5 py-2.5 text-[13px] font-bold text-brand shadow-sm backdrop-blur transition hover:border-brand hover:bg-surface"
+            aria-label="초기 지도 화면으로 돌아가기"
+          >
+            <span aria-hidden="true" className="text-[17px] leading-none">←</span>
+            돌아가기
+          </button>
 
           <RegionMap
             markers={markers}
             height="100%"
             selectedId={selectedId}
             onSelect={(id) => setSelectedId(id)}
+            resetKey={mapResetKey}
             lockToJeonnam
           />
 
@@ -439,7 +451,7 @@ export function MapChatExplorer({
                 {inputMode === "ai" ? "카테고리 선택" : "AI로 입력"}
               </button>
             </div>
-            {foodMarkerCount > 0 && (
+            {mapView === "recommendation" && foodMarkerCount > 0 && (
               <p className="mt-1 text-[11px] font-medium text-brand">
                 추천 음식을 먹을 수 있는 광주·전남 위치 {foodMarkerCount}곳을 지도에 표시했어요
               </p>
@@ -682,7 +694,10 @@ export function MapChatExplorer({
                       {firstFoodMarkerByFoodId.get(food.id) ? (
                         <button
                           type="button"
-                          onClick={() => setSelectedId(firstFoodMarkerByFoodId.get(food.id))}
+                          onClick={() => {
+                            setMapView("recommendation");
+                            setSelectedId(firstFoodMarkerByFoodId.get(food.id));
+                          }}
                           className="mt-2.5 rounded-lg border border-brand px-3 py-1.5 text-[11px] font-bold text-brand transition hover:bg-accent-soft"
                         >
                           지도에서 이 음식 보기
