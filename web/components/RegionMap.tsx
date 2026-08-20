@@ -173,7 +173,7 @@ export function RegionMap({
       );
 
       map = leaflet.map(containerRef.current, {
-        scrollWheelZoom: false,
+        scrollWheelZoom: true,
         attributionControl: true,
         zoomControl: true,
         ...(lockToJeonnam

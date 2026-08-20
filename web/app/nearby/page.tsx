@@ -109,21 +109,20 @@ export default async function NearbyPage({ searchParams }: { searchParams: Searc
           </h1>
           {food && <p className="mt-2 text-[13px] text-fg-muted">먹을 메뉴 · {food}</p>}
           <p className="mt-4 rounded-2xl bg-canvas px-4 py-3 text-[12px] leading-relaxed text-fg-muted">
-            현재 관광지·축제 원본 데이터에는 위·경도가 없어 실제 km 거리순이 아니라
-            <strong className="font-bold text-fg"> 같은 시·군·구 권역</strong>을 기준으로 추천합니다.
+            같은 <strong className="font-bold text-fg">시·군·구 권역</strong>의 관광지와 축제를 추천합니다.
           </p>
         </section>
 
-        <section className="mt-6">
-          <div className="mb-3 flex items-end justify-between gap-3">
-            <div>
-              <p className="text-[11px] font-bold text-brand">TOUR</p>
-              <h2 className="font-display text-[24px] text-fg">근처 관광지</h2>
+        {hasTourism && (
+          <section className="mt-6">
+            <div className="mb-3 flex items-end justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-bold text-brand">TOUR</p>
+                <h2 className="font-display text-[24px] text-fg">근처 관광지</h2>
+              </div>
+              <span className="text-[11px] text-fg-muted">관광 데이터 기준 {tourism.sourceDate}</span>
             </div>
-            <span className="text-[11px] text-fg-muted">관광 데이터 기준 {tourism.sourceDate}</span>
-          </div>
 
-          {hasTourism ? (
             <div className="grid gap-3 sm:grid-cols-2">
               {localTourism.map((item) => (
                 <article key={`${item.sigungu}-${item.name}`} className="rounded-2xl border border-line bg-surface p-4">
@@ -140,20 +139,16 @@ export default async function NearbyPage({ searchParams }: { searchParams: Searc
                 </article>
               ))}
             </div>
-          ) : (
-            <div className="rounded-2xl border border-line bg-surface p-5 text-[13px] text-fg-muted">
-              현재 데이터에서 {region} {area} 권역 관광지를 찾지 못했어요.
+          </section>
+        )}
+
+        {localFestivals.length > 0 && (
+          <section className="mt-8">
+            <div className="mb-3">
+              <p className="text-[11px] font-bold text-brand">FESTIVAL</p>
+              <h2 className="font-display text-[24px] text-fg">근처 축제</h2>
             </div>
-          )}
-        </section>
 
-        <section className="mt-8">
-          <div className="mb-3">
-            <p className="text-[11px] font-bold text-brand">FESTIVAL</p>
-            <h2 className="font-display text-[24px] text-fg">근처 축제</h2>
-          </div>
-
-          {localFestivals.length > 0 ? (
             <div className="grid gap-3 sm:grid-cols-2">
               {localFestivals.map((festival) => (
                 <article key={`${festival.sigungu}-${festival.name}`} className="rounded-2xl border border-line bg-surface p-4">
@@ -164,12 +159,8 @@ export default async function NearbyPage({ searchParams }: { searchParams: Searc
                 </article>
               ))}
             </div>
-          ) : (
-            <div className="rounded-2xl border border-line bg-surface p-5 text-[13px] text-fg-muted">
-              현재 축제 데이터에는 {region} {area} 권역의 등록 축제가 없어요.
-            </div>
-          )}
-        </section>
+          </section>
+        )}
       </div>
     </main>
   );

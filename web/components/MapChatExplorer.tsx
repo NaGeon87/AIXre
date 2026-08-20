@@ -654,7 +654,7 @@ export function MapChatExplorer({
                             }
                             className="flex w-full items-center justify-between rounded-xl border border-line bg-surface px-3 py-2.5 text-left transition hover:border-line-strong"
                           >
-                            <span className="text-[11px] font-bold text-fg-muted">점수 산정 방식 보기 · 피드백용</span>
+                            <span className="text-[11px] font-bold text-fg-muted">점수 산정 방식</span>
                             <span
                               aria-hidden="true"
                               className={`text-[12px] text-fg-muted transition-transform ${
