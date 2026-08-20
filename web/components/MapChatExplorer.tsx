@@ -47,7 +47,7 @@ export function MapChatExplorer({
     {
       role: "assistant",
       content:
-        "취향을 자연스럽게 말해 주세요. 예: ‘매콤한 국물 해산물이 먹고 싶어’, ‘날것 말고 담백한 고기 요리 추천해줘’. 음식 데이터에서 잘 맞는 메뉴를 골라드릴게요.",
+        "어떤 음식을 먹고 싶은지 말해 주세요.\n\n예: '매콤한 국물요리가 먹고 싶어', '광주에서 해산물 요리가 먹고싶어'\n\n사용자 님의 취향에 맞는 음식을 추천해 드릴게요.",
     },
   ]);
   const [input, setInput] = useState("");
@@ -564,11 +564,11 @@ export function MapChatExplorer({
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="font-display text-[21px] text-fg">
-                  {inputMode === "ai" ? "취향 음식 추천 AI" : "취향 카테고리 선택"}
+                  {inputMode === "ai" ? "나만의 음식 취향 찾기" : "취향 카테고리 선택"}
                 </p>
                 <p className="mt-0.5 text-[12px] text-fg-muted">
                   {inputMode === "ai"
-                    ? "자연어 취향을 분석해 음식 데이터에서 메뉴를 추천해요"
+                    ? "AI로 자신의 취향에 맞게 음식을 추천받아요"
                     : "맵기·국물·날것·주재료·시기를 직접 골라 추천받아요"}
                 </p>
               </div>
@@ -596,7 +596,7 @@ export function MapChatExplorer({
                   className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
                 >
                   <div
-                    className={`max-w-[88%] rounded-2xl px-4 py-3 text-[14px] leading-relaxed ${
+                    className={`max-w-[88%] whitespace-pre-line rounded-2xl px-4 py-3 text-[14px] leading-relaxed ${
                       message.role === "user"
                         ? "rounded-br-md bg-brand text-fg-inverse"
                         : "rounded-bl-md border border-line bg-surface-alt text-fg"
@@ -868,7 +868,7 @@ export function MapChatExplorer({
           <div className="border-t border-line p-4">
             {messages.length === 1 && (
               <div className="mb-3 flex flex-wrap gap-1.5">
-                {["엄청 매운 음식", "광주에서 먹을 해산물", "회 말고 담백한 음식"].map(
+                {["많이 매운 음식", "전복요리 먹고 싶어", "익힌 육류 추천해줘"].map(
                   (example) => (
                     <button
                       key={example}
@@ -897,7 +897,7 @@ export function MapChatExplorer({
                   }
                 }}
                 rows={2}
-                placeholder="예: 매콤하고 따뜻한 국물 해산물이 먹고 싶어"
+                placeholder="예: 매콤한 국물요리가 먹고 싶어"
                 className="min-h-[52px] flex-1 resize-none rounded-2xl border border-line bg-canvas px-4 py-3 text-[14px] text-fg outline-none placeholder:text-fg-muted focus:border-brand"
               />
               <button
